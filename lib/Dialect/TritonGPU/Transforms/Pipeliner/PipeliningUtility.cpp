@@ -1,3 +1,6 @@
+/*
+ * Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+ */
 #include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -12,6 +15,8 @@
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
 #include "llvm/Support/Casting.h"
+
+#include "third_party/distributed/dialect/include/Dialect/Distributed/IR/Dialect.h"
 
 using namespace mlir;
 namespace tt = mlir::triton;
@@ -150,6 +155,24 @@ Operation *mlir::triton::predicateOp(RewriterBase &rewriter, Operation *op,
                              atomicRMWOp.getMask(), pred);
     atomicRMWOp.getMaskMutable().assign(mask);
     return op;
+  }
+  // TODO(zhengsize): add predicate to distributed ops?
+  // Distributed barrier ops
+  if (isa<triton::distributed::ConsumeTokenOp>(op))
+    return op;
+  if (isa<triton::distributed::WaitOp>(op)) {
+    // fallback to branch
+    scf::IfOp newIfOp = rewriter.create<scf::IfOp>(
+        op->getLoc(), op->getResultTypes(), pred, true);
+    auto thenB = newIfOp.getThenBodyBuilder();
+    auto newOpInThen = thenB.clone(*op);
+    thenB.create<scf::YieldOp>(op->getLoc(), newOpInThen->getResults());
+    auto elseB = newIfOp.getElseBodyBuilder();
+    auto elseConst = elseB.create<arith::ConstantOp>(
+        op->getLoc(), IntegerAttr::get(op->getResultTypes().front(), 0));
+    elseB.create<scf::YieldOp>(op->getLoc(), elseConst->getResults());
+    rewriter.replaceOp(op, newIfOp.getResults());
+    return newIfOp;
   }
 
   op->emitError("pipeliner doesn't know how to predicate this op.");

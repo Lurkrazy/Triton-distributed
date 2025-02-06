@@ -1,3 +1,6 @@
+################################################################################
+# Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+################################################################################
 from __future__ import annotations
 import hashlib
 import json
@@ -408,6 +411,19 @@ class CompiledKernel:
         # TODO: n_regs, n_spills should be metadata generated when calling `ptxas`
         self.module, self.function, self.n_regs, self.n_spills = driver.active.utils.load_binary(
             self.name, self.kernel, self.metadata.shared, device)
+
+        if hasattr(self.metadata, 'use_nvshmem'):
+            if self.metadata.use_nvshmem:
+                # patch function with nvshmem
+                import pynvshmem
+                pynvshmem.nvshmemx_cumodule_init(self.module)
+        elif hasattr(self.metadata, 'use_rocshmem'):
+            if self.metadata.use_rocshmem:
+                pass
+                ## TODO: add pyrocshmem init
+                # import pyrocshmem
+        else:
+            print("Warning: No nvshmem/rocshmem imported.")
 
     def __getattribute__(self, name):
         if name == 'run':

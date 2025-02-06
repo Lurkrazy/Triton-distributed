@@ -1,3 +1,7 @@
+################################################################################
+# Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+################################################################################
+# fmt: off
 from triton.backends.compiler import BaseBackend, GPUTarget
 from triton._C.libtriton import ir, passes, llvm, nvidia
 from triton.runtime.errors import PTXASError
@@ -134,6 +138,7 @@ class CUDAOptions:
     allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee")
     max_num_imprecise_acc_default: bool = None
     extern_libs: dict = None
+    nvshmem_device_lib: str = ""
     debug: bool = False
     backend_name: str = 'cuda'
     sanitize_overflow: bool = True
@@ -144,7 +149,10 @@ class CUDAOptions:
         extern_libs = {} if self.extern_libs is None else dict(self.extern_libs)
         if not extern_libs.get('libdevice', None):
             extern_libs['libdevice'] = os.getenv("TRITON_LIBDEVICE_PATH", str(default_libdir / 'libdevice.10.bc'))
+        nvshmem_device_lib = os.getenv("TRITON_LIBDEVICE_PATH", str(default_libdir / 'libnvshmem_device.bc'))
+
         object.__setattr__(self, 'extern_libs', tuple(extern_libs.items()))
+        object.__setattr__(self, 'nvshmem_device_lib', nvshmem_device_lib)
         assert self.num_warps > 0 and (self.num_warps & (self.num_warps - 1)) == 0, \
                "num_warps must be a power of 2"
 
@@ -216,7 +224,9 @@ class CUDABackend(BaseBackend):
 
     def get_module_map(self) -> Dict[str, ModuleType]:
         from triton.language.extra.cuda import libdevice
-        return {"triton.language.extra.libdevice": libdevice}
+        from triton.language.extra.cuda import libnvshmem_device
+        return {"triton.language.extra.libdevice": libdevice,
+                "triton.language.extra.libshmem_device": libnvshmem_device,}
 
     def load_dialects(self, ctx):
         nvidia.load_dialects(ctx)
@@ -340,11 +350,22 @@ class CUDABackend(BaseBackend):
             for k in llvm_mod.get_functions():
                 if not k.is_declaration() and k.is_external_linkage():
                     k.set_nvvm_maxnreg(options.maxnreg)
+        metadata['use_nvshmem'] = False
+        for k in llvm_mod.get_functions():
+            # TODO(zhengxuegui.0): check whether the function exists in libnvshmem_device.bc
+            if "nvshmem" in k.name and k.is_declaration():
+                metadata['use_nvshmem'] = True
+                break
+
+        # inline nvshmem ptx
+        if "nvshmemi_device_state_d" in str(llvm_mod):
+            metadata['use_nvshmem'] = True
 
         if options.extern_libs:
             paths = [path for (name, path) in options.extern_libs]
             llvm.link_extern_libs(llvm_mod, paths)
-
+        if options.nvshmem_device_lib and metadata['use_nvshmem']:
+            llvm.link_extern_libs(llvm_mod, [options.nvshmem_device_lib])
         llvm.optimize_module(llvm_mod, llvm.OPTIMIZE_O3)
 
         # Get some metadata
@@ -420,7 +441,7 @@ class CUDABackend(BaseBackend):
                                  f"`ptxas` stderr:\n{log}\n"
                                  f'Repro command: {" ".join(ptxas_cmd)}\n')
 
-            with open(fbin, 'rb') as f:
+            with open(fbin, "rb") as f:
                 cubin = f.read()
             if os.path.exists(fbin):
                 os.remove(fbin)

@@ -1,3 +1,6 @@
+################################################################################
+# Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+################################################################################
 import os
 import platform
 import re
@@ -388,7 +391,37 @@ class CMakeBuild(build_ext):
     def finalize_options(self):
         build_ext.finalize_options(self)
 
+    def build_nvshmem(self, cap):
+        nvshmem_dir = os.path.join(get_base_dir(), "third_party", "nvshmem_bind")
+        if not os.path.exists(nvshmem_dir):
+            raise RuntimeError("NVSHMEM source directory not found")
+
+        CUDA_ARCH = "".join([str(x) for x in cap])
+        extra_args = ["--arch", CUDA_ARCH] if CUDA_ARCH != "" else []
+        subprocess.check_call(["bash", f"{nvshmem_dir}/build.sh"] + extra_args)
+
+    def build_rocshmem(self, cap):
+        rocshmem_dir = os.path.join(get_base_dir(), "third_party", "rocshmem_bind")
+        if not os.path.exists(rocshmem_dir):
+            raise RuntimeError("ROCSHMEM source directory not found")
+
+        ROCM_ARCH = "gfx942"  # hard-code for now
+        extra_args = ["--arch", ROCM_ARCH] if ROCM_ARCH != "" else []
+        subprocess.check_call(["bash", f"{rocshmem_dir}/build.sh"] + extra_args)
+
     def run(self):
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                if torch.version.hip is None:
+                    self.build_nvshmem(torch.cuda.get_device_capability())
+                else:
+                    self.build_rocshmem(torch.cuda.get_device_capability())  # (9, 4)
+        except Exception:
+            print("Cannot import torch.")
+            pass
+
         try:
             out = subprocess.check_output(["cmake", "--version"])
         except OSError:
@@ -488,6 +521,7 @@ class CMakeBuild(build_ext):
         # environment variables we will pass through to cmake
         passthrough_args = [
             "TRITON_BUILD_PROTON",
+            "TRITON_BUILD_DISTRIBUTED",
             "TRITON_BUILD_WITH_CCACHE",
             "TRITON_PARALLEL_LINK_JOBS",
         ]
@@ -495,6 +529,9 @@ class CMakeBuild(build_ext):
 
         if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
             cmake_args += self.get_proton_cmake_args()
+
+        if check_env_flag("USE_TRITON_DISTRIBUTED_AOT", "0"):  # Default OFF
+            cmake_args += ["-DUSE_TRITON_DISTRIBUTED_AOT=ON"]
 
         if is_offline_build():
             # unit test builds fetch googletests from GitHub
@@ -614,10 +651,19 @@ def add_link_to_proton():
     update_symlink(proton_install_dir, proton_dir)
 
 
+def add_link_to_distributed():
+    distributed_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, "third_party", "distributed", "distributed"))
+    distributed_install_dir = os.path.join(os.path.dirname(__file__), "triton", "distributed")
+    update_symlink(distributed_install_dir, distributed_dir)
+
+
 def add_links():
     add_link_to_backends()
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         add_link_to_proton()
+    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):  # Default ON
+        add_link_to_distributed()
 
 
 class plugin_install(install):
@@ -696,6 +742,8 @@ def get_packages():
     packages += get_extra_packages("tools")
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         packages += ["triton/profiler"]
+    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):  # Default ON
+        packages += ["triton/distributed"]
 
     return packages
 

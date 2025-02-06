@@ -1,3 +1,6 @@
+################################################################################
+# Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+################################################################################
 from __future__ import annotations
 
 from warnings import warn
@@ -634,6 +637,12 @@ class pointer_type(dtype):
         if not isinstance(other, pointer_type):
             return False
         return self.element_ty == other.element_ty and self.address_space == other.address_space and self.const == other.const
+
+    def __ne__(self, other: pointer_type) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash((self.name, self.element_ty, "tt_ptr"))
 
     @property
     def scalar(self):
@@ -3066,7 +3075,7 @@ def dispatch(func, lib_name: str, lib_path: str, args: list, arg_type_symbol_dic
 
 @builtin
 def extern_elementwise(lib_name: str, lib_path: str, args: list, arg_type_symbol_dict: dict, is_pure: bool,
-                       _builder=None):
+                       _builder=None, check_args=True):
     '''
         Dispatch an elementwise function to a library
         :param lib_name: the name of the library
@@ -3093,16 +3102,19 @@ def extern_elementwise(lib_name: str, lib_path: str, args: list, arg_type_symbol
         if arg_types in arg_type_symbol_dict:
             arithmetic_check = False
         broadcast_arg = dispatch_args[0]
-        # Get the broadcast shape over all the arguments
-        for item in dispatch_args:
-            _, broadcast_arg = semantic.binary_op_type_checking_impl(item, broadcast_arg, _builder,
-                                                                     arithmetic_check=arithmetic_check)
-        # Change the shape of each argument based on the broadcast shape
-        for i in builtins.range(len(dispatch_args)):
-            dispatch_args[i], _ = semantic.binary_op_type_checking_impl(dispatch_args[i], broadcast_arg, _builder,
-                                                                        arithmetic_check=arithmetic_check)
-        if not all_scalar:
-            ret_shape = broadcast_arg.shape
+        if check_args:
+            # Get the broadcast shape over all the arguments
+            for item in dispatch_args:
+                _, broadcast_arg = semantic.binary_op_type_checking_impl(item, broadcast_arg, _builder,
+                                                                         allow_lhs_ptr=True, allow_rhs_ptr=True,
+                                                                         arithmetic_check=arithmetic_check)
+            # Change the shape of each argument based on the broadcast shape
+            for i in builtins.range(len(dispatch_args)):
+                dispatch_args[i], _ = semantic.binary_op_type_checking_impl(dispatch_args[i], broadcast_arg, _builder,
+                                                                            allow_lhs_ptr=True, allow_rhs_ptr=True,
+                                                                            arithmetic_check=arithmetic_check)
+            if not all_scalar:
+                ret_shape = broadcast_arg.shape
     func = _builder.create_extern_elementwise
     return dispatch(func, lib_name, lib_path, dispatch_args, arg_type_symbol_dict, ret_shape, is_pure, _builder)
 

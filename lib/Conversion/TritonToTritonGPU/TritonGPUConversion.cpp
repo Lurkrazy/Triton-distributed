@@ -1,3 +1,6 @@
+/*
+ * Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+ */
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
 
 #include <algorithm>
@@ -9,6 +12,8 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+
+#include "third_party/distributed/dialect/include/Dialect/Distributed/IR/Dialect.h"
 
 using namespace mlir;
 using namespace mlir::triton::gpu;
@@ -96,9 +101,10 @@ TritonGPUConversionTarget::TritonGPUConversionTarget(
   addIllegalOp<scf::ExecuteRegionOp, scf::ParallelOp, scf::ReduceOp,
                scf::ReduceReturnOp>();
 
-  addDynamicallyLegalDialect<arith::ArithDialect, math::MathDialect,
-                             triton::TritonDialect, cf::ControlFlowDialect,
-                             scf::SCFDialect, ub::UBDialect>(
+  addDynamicallyLegalDialect<
+      arith::ArithDialect, math::MathDialect, triton::TritonDialect,
+      cf::ControlFlowDialect, scf::SCFDialect,
+      triton::distributed::DistributedDialect, ub::UBDialect>(
       [&](Operation *op) {
         bool hasLegalRegions = true;
         for (auto &region : op->getRegions()) {

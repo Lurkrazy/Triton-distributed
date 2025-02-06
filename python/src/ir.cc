@@ -1,3 +1,6 @@
+/*
+ * Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+ */
 #include <optional>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -32,6 +35,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include "third_party/distributed/dialect/include/Dialect/Distributed/IR/Dialect.h"
 #include "third_party/proton/dialect/include/Dialect/Proton/IR/Dialect.h"
 
 namespace {
@@ -304,6 +308,17 @@ void init_triton_ir(py::module &&m) {
       .value("FP16", ScaleDotElemType::FP16)
       .export_values();
 
+  py::enum_<distributed::SignalOp>(m, "SIGNAL_OP", py::module_local())
+      .value("SET", distributed::SignalOp::SET)
+      .value("ADD", distributed::SignalOp::ADD)
+      .export_values();
+
+  py::enum_<distributed::CommScope>(m, "COMM_SCOPE", py::module_local())
+      .value("GPU", distributed::CommScope::GPU)
+      .value("INTRA_NODE", distributed::CommScope::INTRA_NODE)
+      .value("INTER_NODE", distributed::CommScope::INTER_NODE)
+      .export_values();
+
   py::class_<MLIRContext>(m, "context", py::module_local())
       .def(py::init<>())
       .def("printOpOnDiagnostic",
@@ -324,8 +339,9 @@ void init_triton_ir(py::module &&m) {
     registry.insert<TritonDialect, ::mlir::triton::gpu::TritonGPUDialect,
                     math::MathDialect, arith::ArithDialect, scf::SCFDialect,
                     ::mlir::gpu::GPUDialect, cf::ControlFlowDialect,
-                    ::mlir::triton::proton::ProtonDialect, LLVM::LLVMDialect,
-                    mlir::ub::UBDialect>();
+                    ::mlir::triton::proton::ProtonDialect,
+                    ::mlir::triton::distributed::DistributedDialect,
+                    LLVM::LLVMDialect, mlir::ub::UBDialect>();
     mlir::LLVM::registerInlinerInterface(registry);
     registerBuiltinDialectTranslation(registry);
     registerLLVMDialectTranslation(registry);
@@ -1762,6 +1778,47 @@ void init_triton_ir(py::module &&m) {
       .def("create_proton_record",
            [](TritonOpBuilder &self, bool isStart, int32_t regionId) -> void {
              self.create<mlir::triton::proton::RecordOp>(isStart, regionId);
+           })
+      // Distributed Ops
+      .def("create_distributed_wait",
+           [](TritonOpBuilder &self, Value &barrierPtrs, Value &numBarriers,
+              Value &waitValue, MemSyncScope scope, MemSemantic semantic,
+              Type &type) -> Value {
+             return self.create<mlir::triton::distributed::WaitOp>(
+                 type, barrierPtrs, numBarriers, waitValue, scope, semantic);
+           })
+      .def("create_distributed_consume_token",
+           [](TritonOpBuilder &self, Value &input, Value &token) -> Value {
+             return self.create<mlir::triton::distributed::ConsumeTokenOp>(
+                 input, token);
+           })
+      .def("create_get_rank",
+           [](TritonOpBuilder &self, Value axis) -> Value {
+             return self.create<mlir::triton::distributed::GetRankOp>(axis);
+           })
+      .def("create_get_num_ranks",
+           [](TritonOpBuilder &self, Value axis) -> Value {
+             return self.create<mlir::triton::distributed::GetNumRanksOp>(axis);
+           })
+      .def("create_symm_at",
+           [](TritonOpBuilder &self, Value ptr, Value rank) -> Value {
+             return self.create<mlir::triton::distributed::SymmAtOp>(
+                 ptr.getType(), ptr, rank);
+           })
+      .def("create_notify",
+           [](TritonOpBuilder &self, Value ptr, Value signal, Value rank,
+              distributed::SignalOp sigOp,
+              distributed::CommScope commScope) -> void {
+             self.create<mlir::triton::distributed::NotifyOp>(ptr, signal, rank,
+                                                              sigOp, commScope);
+           })
+      .def("create_extern_call",
+           [](TritonOpBuilder &self, const std::string &libName,
+              const std::string &libPath, const std::string &symbol,
+              std::vector<Value> &argList, const std::vector<Type> &retTypes,
+              bool isPure) -> OpState {
+             return self.create<mlir::triton::distributed::ExternCallOp>(
+                 retTypes, argList, libName, libPath, symbol, isPure);
            });
 
   py::class_<PassManager>(m, "pass_manager", py::module_local())

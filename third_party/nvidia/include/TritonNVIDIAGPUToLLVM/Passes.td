@@ -1,3 +1,6 @@
+//
+// Modification Copyright 2025 ByteDance Ltd. and/or its affiliates.
+//
 #ifndef TRITONGPU_CONVERSION_PASSES
 #define TRITONGPU_CONVERSION_PASSES
 
@@ -18,6 +21,7 @@ def ConvertTritonGPUToLLVM : Pass<"convert-triton-gpu-to-llvm", "mlir::ModuleOp"
                              "mlir::triton::TritonDialect",
                              "mlir::triton::gpu::TritonGPUDialect",
                              "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
+                             "triton::distributed::DistributedDialect",
                              "mlir::triton::nvgpu::NVGPUDialect",
                              "mlir::NVVM::NVVMDialect"];
 
