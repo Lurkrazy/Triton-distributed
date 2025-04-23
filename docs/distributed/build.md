@@ -1,6 +1,6 @@
 # Build Triton-distributed
 
-#### The best practice to use Triton-distributed:
+## The best practice to use Triton-distributed with the Nvidia backend:
 - Python 3.9 (suggest using virtual environment)
 - CUDA 12.4
 - Torch 2.4.1
@@ -8,7 +8,7 @@
 
 Dependencies with other versions may also work well, but this is not guaranteed. If you find any problem in installing, please tell us in Issues.
 
-#### Steps:
+### Steps:
 1. Clone Triton-distributed to your own path (e.g., `/home/Triton-distributed`)
 2. Update submodules
     ```sh
